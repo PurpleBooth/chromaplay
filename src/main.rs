@@ -39,7 +39,6 @@ fn main() -> Result<(), BoxedError> {
 
     let (mut format, mut decoder) = make_parser(&args.audio_file_path)?;
     let track_id = format.default_track().expect("no default track").id;
-    let mut sample_buf = None;
     let mut ctx = make_chroma_ctx(&mut decoder)?;
 
     loop {
@@ -58,19 +57,25 @@ fn main() -> Result<(), BoxedError> {
             continue;
         }
 
+        if decoder
+            .codec_params()
+            .time_base
+            .expect("No timeBase???")
+            .calc_time(packet.ts())
+            .seconds
+            >= 120
+        {
+            break;
+        }
+
         match decoder.decode(&packet) {
             Ok(audio_buf) => {
-                if sample_buf.is_none() {
-                    let duration = audio_buf.capacity() as u64;
-                    let spec = *audio_buf.spec();
+                let duration = audio_buf.capacity() as u64;
+                let spec = *audio_buf.spec();
 
-                    sample_buf = Some(SampleBuffer::<i16>::new(duration, spec));
-                }
-
-                if let Some(buf) = &mut sample_buf {
-                    buf.copy_interleaved_ref(audio_buf);
-                    ctx.feed(buf.samples())?;
-                }
+                let mut sample_buf = SampleBuffer::<i16>::new(duration, spec);
+                sample_buf.copy_interleaved_ref(audio_buf);
+                ctx.feed(sample_buf.samples())?;
             }
             Err(err) => {
                 return Err(err.into());
